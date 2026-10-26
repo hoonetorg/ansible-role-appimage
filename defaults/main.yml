@@ -1,0 +1,15 @@
+---
+# Merged with the inventory variable `appimage` into `appimage_final`.
+appimage_defaults:
+  # apps installed on this host for all users (always the version the vendor publishes as latest); apps of the
+  # catalog not listed are removed again (with a cleanup note). Known: kdrive, kchat, kmeet, signal (vars/main.yml)
+  apps: []
+  # AppImages of apps without their own dir in the catalog (the Infomaniak apps keep /opt/ksuite); fixed file names
+  # without version, so per-user autostart entries and launchers stay valid across updates
+  dir: /opt/appimage
+  # fusermount for the AppImage runtime (libfuse is built in); squashfs (unsquashfs) only when an app with a menu
+  # entry is listed (its icon is taken from the verified AppImage, without running it)
+  packages: [fuse]
+  # menu entries (only catalog apps with `desktop`) and their icons
+  launcher_dir: /usr/local/share/applications
+  icon_dir: /usr/local/share/appimage

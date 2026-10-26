@@ -1,0 +1,12 @@
+App "{{ appimage_app.name }}" ({{ appimage_app_id }}) removed by ansible-role-appimage
+host:     {{ inventory_hostname }}
+date:     {{ now(fmt='%Y-%m-%d %H:%M:%S') }}
+removed:  {{ appimage_remove | join(', ') }}
+
+The role never touches the homes. Left there, per user that used the app (close it first):
+{% for line in appimage_app.cleanup | default([]) %}
+  {{ line }}
+{% endfor %}
+{% if appimage_note_dir %}
+Note: {{ appimage_note }}{{ ' (check mode: not written)' if ansible_check_mode else '' }}
+{% endif %}

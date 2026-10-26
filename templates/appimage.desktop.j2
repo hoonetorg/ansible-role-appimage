@@ -1,0 +1,15 @@
+[Desktop Entry]
+# {{ ansible_managed }}
+Type=Application
+Name={{ appimage_app.desktop.name }}
+Comment={{ appimage_app.desktop.comment | default('') }}
+Exec={{ appimage_file }} %U
+Icon={{ appimage_icon }}
+Terminal=false
+Categories={{ appimage_app.desktop.categories | default('Utility;') }}
+{% if appimage_app.desktop.mime_types is defined %}
+MimeType={{ appimage_app.desktop.mime_types }}
+{% endif %}
+{% if appimage_app.desktop.wm_class is defined %}
+StartupWMClass={{ appimage_app.desktop.wm_class }}
+{% endif %}

@@ -1,0 +1,61 @@
+---
+# AppImages known to the role (all x86_64). Per app:
+# - name: file name (<name>.AppImage) in `dir` (default appimage.dir)
+# - source: how the current version is found
+#   - infomaniak: release_url = JSON with the current version, release_keys = names of its Linux x86_64 entry
+#     (downloadurl), tried in order, first existing wins - Infomaniak renames them (kChat 2026-10: linux →
+#     linux-amd64); checksum: sha256 = <downloadurl>.sha256 (kDrive), electron = sha512 in latest-linux.yml next to
+#     the AppImage (electron-builder). Same values as ansible-role-ksuite → same files, same checks.
+#   - electron_yml: base_url/latest-linux.yml (electron-builder) → file name and sha512 of the current AppImage
+# - gpg: the AppImage must carry a valid signature (<file>.gpg next to it) of this key (files/<key>, binary
+#   keyring) with this primary key fingerprint
+# - desktop: menu entry for all users; icon = path inside the AppImage (extracted with unsquashfs, not run)
+# - cleanup: shown when the app is removed (data left in the homes)
+appimage_catalog:
+  kdrive:
+    name: kDrive
+    dir: /opt/ksuite
+    source: infomaniak
+    release_url: https://www.infomaniak.com/drive/latest
+    release_keys: [linux-amd64]
+    checksum: sha256
+    cleanup:
+      - rm -rf ~/.config/kDrive   (settings; the synced files stay)
+      - rm -f ~/.config/autostart/kDrive*.desktop ~/.local/share/applications/kDrive.desktop
+  kchat:
+    name: kChat
+    dir: /opt/ksuite
+    source: infomaniak
+    release_url: https://www.infomaniak.com/kchat/latest
+    release_keys: [linux-amd64, linux]
+    checksum: electron
+    cleanup:
+      - rm -rf ~/.config/kChat   (settings, login, cache)
+      - rm -f ~/.config/autostart/kChat*.desktop
+  kmeet:
+    name: kMeet
+    dir: /opt/ksuite
+    source: infomaniak
+    release_url: https://www.infomaniak.com/kmeet/latest
+    release_keys: [linux-amd64, linux]
+    checksum: electron
+    cleanup:
+      - rm -rf ~/.config/kMeet   (settings, login, cache)
+      - rm -f ~/.config/autostart/kMeet*.desktop
+  signal:
+    name: Signal
+    source: electron_yml
+    base_url: https://updates.signal.org/desktop
+    gpg:
+      key: signal-appimage.gpg
+      fingerprint: 4B16B7232DFAA439AD791002EF9F501F13EED94C
+    desktop:
+      name: Signal
+      comment: Private messaging from your desktop
+      icon: usr/share/icons/hicolor/256x256/apps/signal-desktop.png
+      wm_class: signal
+      categories: Network;InstantMessaging;Chat;
+      mime_types: x-scheme-handler/sgnl;x-scheme-handler/signalcaptcha;
+    cleanup:
+      - first unlink it in Signal on the phone (Settings → Linked devices) if it is not used again
+      - rm -rf ~/.config/Signal   (message history of this computer, keys, settings - gone for good)

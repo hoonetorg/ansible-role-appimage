@@ -1,0 +1,75 @@
+---
+- name: "{{ appimage_app.name }}: install"
+  when: appimage_app_id in appimage_final.apps
+  block:
+    - name: "{{ appimage_app.name }}: AppImage"
+      ansible.builtin.include_tasks: "source_{{ appimage_app.source }}.yml"
+
+    - name: "{{ appimage_app.name }}: menu entry"
+      ansible.builtin.include_tasks: desktop.yml
+      when: appimage_app.desktop is defined
+
+# not in apps → AppImage (and menu entry, icon) removed; the user data in the homes stays - a cleanup note says what
+# is left (shown as "changed", so it is visible at the default verbosity, and saved next to the ansible log)
+- name: "{{ appimage_app.name }}: remove"
+  when: appimage_app_id not in appimage_final.apps
+  block:
+    - name: "{{ appimage_app.name }}: installed files"
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ [appimage_file] + ([appimage_launcher, appimage_icon] if appimage_app.desktop is defined else []) }}"
+      register: appimage_present
+
+    - name: "{{ appimage_app.name }}: files to remove"
+      ansible.builtin.set_fact:
+        appimage_remove: "{{ appimage_present.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+
+    # fixed once: message, note text and file name must agree
+    - name: "{{ appimage_app.name }}: cleanup note"
+      when: appimage_remove | length > 0
+      ansible.builtin.set_fact:
+        appimage_note_dir: >-
+          {{ (appimage_log | dirname ~ '/cleanup/' ~ inventory_hostname) if appimage_log | length > 0 else '' }}
+        appimage_note: >-
+          {{ appimage_log | dirname ~ '/cleanup/' ~ inventory_hostname ~ '/appimage-' ~ appimage_app_id ~ '-'
+             ~ now(fmt='%Y%m%d-%H%M%S') ~ '.txt' }}
+      vars:
+        appimage_log: "{{ lookup('ansible.builtin.config', 'DEFAULT_LOG_PATH') | default('', true) }}"
+
+    - name: "{{ appimage_app.name }}: cleanup note text"
+      when: appimage_remove | length > 0
+      ansible.builtin.set_fact:
+        appimage_text: "{{ lookup('ansible.builtin.template', 'appimage-cleanup.txt.j2') }}"
+
+    - name: "{{ appimage_app.name }}: removal"
+      when: appimage_remove | length > 0
+      block:
+        - name: "{{ appimage_app.name }}: removed - cleanup per user"
+          ansible.builtin.debug:
+            msg: "{{ appimage_text | trim | split('\\n') }}"
+          changed_when: true
+
+        - name: "{{ appimage_app.name }}: cleanup note directory (controller, next to the ansible log)"
+          ansible.builtin.file:
+            path: "{{ appimage_note_dir }}"
+            state: directory
+            mode: "0755"
+          delegate_to: localhost
+          become: false
+          when: appimage_note_dir | length > 0
+
+        - name: "{{ appimage_app.name }}: cleanup note (controller)"
+          ansible.builtin.copy:
+            content: "{{ appimage_text }}"
+            dest: "{{ appimage_note }}"
+            mode: "0644"
+          delegate_to: localhost
+          become: false
+          when: appimage_note_dir | length > 0
+
+        - name: "{{ appimage_app.name }}: remove files"
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ appimage_remove }}"
+          notify: Update desktop database

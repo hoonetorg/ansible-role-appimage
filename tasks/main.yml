@@ -1,0 +1,61 @@
+---
+- name: Build final appimage configuration
+  ansible.builtin.set_fact:
+    appimage_final: "{{ appimage_defaults | combine(appimage | default({}), recursive=True) }}"
+
+- name: Assert appimage apps (known apps)
+  ansible.builtin.assert:
+    that: appimage_final.apps | difference(appimage_catalog.keys()) | length == 0
+    fail_msg: >-
+      appimage: apps must be out of {{ appimage_catalog.keys() | join(', ') }}, not {{ appimage_final.apps | join(', ') }}
+    quiet: true
+
+# listed apps with a menu entry (their icon comes from the AppImage via unsquashfs)
+- name: Apps with a menu entry
+  ansible.builtin.set_fact:
+    appimage_desktop_apps: >-
+      {{ appimage_final.apps | select('in', appimage_catalog | dict2items | selectattr('value.desktop', 'defined')
+         | map(attribute='key')) | list }}
+
+- name: Install AppImages
+  when: appimage_final.apps | length > 0
+  block:
+    - name: Only openSUSE on x86_64 is supported
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == 'Suse'
+          - ansible_facts['architecture'] == 'x86_64'
+        fail_msg: >-
+          appimage: only openSUSE on x86_64 is implemented (the apps are x86_64 AppImages), not
+          {{ ansible_facts['distribution'] }} on {{ ansible_facts['architecture'] }}
+        quiet: true
+
+    - name: Install packages for the AppImages
+      ansible.builtin.package:
+        name: "{{ appimage_final.packages + (['squashfs'] if appimage_desktop_apps | length > 0 else []) }}"
+        state: present
+
+    - name: AppImage directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: >-
+        {{ (appimage_final.apps | map('extract', appimage_catalog) | map(attribute='dir', default=appimage_final.dir)
+            | list + ([appimage_final.launcher_dir, appimage_final.icon_dir] if appimage_desktop_apps | length > 0
+                      else [])) | unique }}
+
+# every known app: installed when listed in apps, removed otherwise (desired state)
+- name: AppImage app
+  ansible.builtin.include_tasks: app.yml
+  loop: "{{ appimage_catalog.keys() | list }}"
+  loop_control:
+    loop_var: appimage_app_id
+  vars:
+    appimage_app: "{{ appimage_catalog[appimage_app_id] }}"
+    appimage_dir: "{{ appimage_catalog[appimage_app_id].dir | default(appimage_final.dir) }}"
+    appimage_file: "{{ appimage_dir }}/{{ appimage_catalog[appimage_app_id].name }}.AppImage"
+    appimage_launcher: "{{ appimage_final.launcher_dir }}/appimage-{{ appimage_app_id }}.desktop"
+    appimage_icon: "{{ appimage_final.icon_dir }}/{{ appimage_app_id }}.png"

@@ -1,0 +1,84 @@
+---
+# menu entry for all users: icon taken from the installed (verified) AppImage with unsquashfs - the AppImage is not
+# run; extracted again after an update or when the icon is missing/empty, owner/mode checked on every run
+- name: "{{ appimage_app.name }}: icon"
+  ansible.builtin.stat:
+    path: "{{ appimage_icon }}"
+  register: appimage_icon_stat
+
+- name: "{{ appimage_app.name }}: AppImage present"
+  ansible.builtin.stat:
+    path: "{{ appimage_file }}"
+  register: appimage_file_stat
+
+- name: "{{ appimage_app.name }}: icon from the AppImage"
+  when:
+    - appimage_file_stat.stat.exists
+    - appimage_changed | bool or not appimage_icon_stat.stat.exists or appimage_icon_stat.stat.size | default(0) == 0
+    - not ansible_check_mode
+  block:
+    # type 2 AppImage = ELF runtime + squashfs; the squashfs starts where the ELF ends (end of the section headers)
+    - name: "{{ appimage_app.name }}: squashfs offset"
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - >-
+            import struct, sys; h = open(sys.argv[1], 'rb').read(64);
+            print(struct.unpack('<Q', h[40:48])[0] + struct.unpack('<H', h[58:60])[0] * struct.unpack('<H', h[60:62])[0])
+          - "{{ appimage_file }}"
+      register: appimage_offset
+      changed_when: false
+
+    - name: "{{ appimage_app.name }}: temporary directory"
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: .appimage
+      register: appimage_extract
+
+    - name: "{{ appimage_app.name }}: extract the icon"
+      ansible.builtin.command:
+        argv:
+          - unsquashfs
+          - -o
+          - "{{ appimage_offset.stdout | trim }}"
+          - -d
+          - "{{ appimage_extract.path }}/root"
+          - -no-xattrs
+          - "{{ appimage_file }}"
+          - "{{ appimage_app.desktop.icon }}"
+      changed_when: false
+
+    - name: "{{ appimage_app.name }}: install the icon"
+      ansible.builtin.copy:
+        src: "{{ appimage_extract.path }}/root/{{ appimage_app.desktop.icon }}"
+        dest: "{{ appimage_icon }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
+  always:
+    - name: "{{ appimage_app.name }}: remove the temporary directory"
+      ansible.builtin.file:
+        path: "{{ appimage_extract.path }}"
+        state: absent
+      when: appimage_extract.path is defined
+      changed_when: false
+
+- name: "{{ appimage_app.name }}: icon owner/mode"
+  ansible.builtin.file:
+    path: "{{ appimage_icon }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: appimage_icon_stat.stat.exists
+
+- name: "{{ appimage_app.name }}: launcher"
+  ansible.builtin.template:
+    src: appimage.desktop.j2
+    dest: "{{ appimage_launcher }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Update desktop database

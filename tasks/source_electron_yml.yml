@@ -1,0 +1,121 @@
+---
+# electron-builder's latest-linux.yml: file name + sha512 of the current AppImage. With `gpg`: the download must
+# also carry a valid signature of the pinned key before it replaces the installed file
+- name: "{{ appimage_app.name }}: latest-linux.yml"
+  ansible.builtin.uri:
+    url: "{{ appimage_app.base_url }}/latest-linux.yml"
+    return_content: true
+  register: appimage_update_info
+  check_mode: false               # read only; --check shows the real result
+
+- name: "{{ appimage_app.name }}: current version"
+  ansible.builtin.set_fact:
+    appimage_latest: "{{ appimage_update_info.content | from_yaml }}"
+
+# sha512 is base64 there, compared as hex
+- name: "{{ appimage_app.name }}: sha512 as hex"
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - import base64, sys; print(base64.b64decode(sys.argv[1]).hex())
+      - "{{ appimage_latest.sha512 }}"
+  register: appimage_sha512
+  changed_when: false
+  check_mode: false
+
+- name: "{{ appimage_app.name }}: installed file"
+  ansible.builtin.stat:
+    path: "{{ appimage_file }}"
+    checksum_algorithm: sha512
+  register: appimage_installed
+
+- name: "{{ appimage_app.name }}: update needed"
+  ansible.builtin.set_fact:
+    appimage_changed: >-
+      {{ not appimage_installed.stat.exists
+         or appimage_installed.stat.checksum | default('') != appimage_sha512.stdout | trim }}
+    appimage_url: "{{ appimage_app.base_url }}/{{ appimage_latest.path }}"
+
+- name: "{{ appimage_app.name }}: update to {{ appimage_latest.version }} (check mode: not downloaded)"
+  ansible.builtin.debug:
+    msg: "{{ appimage_url }} → {{ appimage_file }}"
+  changed_when: true
+  when: appimage_changed | bool and ansible_check_mode
+
+- name: "{{ appimage_app.name }}: download, verify, install {{ appimage_latest.version }}"
+  when: appimage_changed | bool and not ansible_check_mode
+  vars:
+    appimage_tmp: "{{ appimage_dir }}/.{{ appimage_app.name }}.AppImage.download"
+    appimage_key: "{{ appimage_dir }}/.{{ appimage_app_id }}-key.gpg"
+  block:
+    - name: "{{ appimage_app.name }}: download (checked against the sha512)"
+      ansible.builtin.get_url:
+        url: "{{ appimage_url }}"
+        dest: "{{ appimage_tmp }}"
+        checksum: "sha512:{{ appimage_sha512.stdout | trim }}"
+        force: true
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: "{{ appimage_app.name }}: signature check"
+      when: appimage_app.gpg is defined
+      block:
+        - name: "{{ appimage_app.name }}: signature"
+          ansible.builtin.get_url:
+            url: "{{ appimage_url }}.gpg"
+            dest: "{{ appimage_tmp }}.gpg"
+            force: true
+            mode: "0600"
+
+        - name: "{{ appimage_app.name }}: signing key (from the role)"
+          ansible.builtin.copy:
+            src: "{{ appimage_app.gpg.key }}"
+            dest: "{{ appimage_key }}"
+            mode: "0600"
+
+        # only this keyring counts (--keyring: no default keyring); VALIDSIG ends with the primary key fingerprint.
+        # Only the result lines are passed on: Signal's signature carries a binary notation (salt) that gpgv prints
+        # raw, which ansible refuses as module output (not UTF-8); pipefail keeps gpgv's exit code
+        - name: "{{ appimage_app.name }}: verify signature"
+          ansible.builtin.shell:
+            cmd: >-
+              set -o pipefail;
+              gpgv --keyring {{ appimage_key | quote }} --status-fd 1 {{ (appimage_tmp ~ '.gpg') | quote }}
+              {{ appimage_tmp | quote }} 2>/dev/null
+              | LC_ALL=C grep -a -E '^.GNUPG:. (VALIDSIG|BADSIG|ERRSIG|NO_PUBKEY|EXPKEYSIG|REVKEYSIG) '
+            executable: /bin/bash
+          register: appimage_gpgv
+          changed_when: false
+          failed_when: >-
+            appimage_gpgv.rc != 0
+            or not (appimage_gpgv.stdout is search('VALIDSIG .* ' ~ appimage_app.gpg.fingerprint ~ '$', multiline=True))
+
+    # same directory → atomic rename; running instances keep the old file until they restart
+    - name: "{{ appimage_app.name }}: install"
+      ansible.builtin.copy:
+        src: "{{ appimage_tmp }}"
+        dest: "{{ appimage_file }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+
+  rescue:
+    - name: "{{ appimage_app.name }}: download or signature check failed"
+      ansible.builtin.fail:
+        msg: >-
+          appimage: {{ appimage_app.name }} {{ appimage_latest.version }} NOT installed - download or signature check
+          failed, the installed file is unchanged. {{ ansible_failed_result.msg | default('') }}
+          {{ ansible_failed_result.stdout | default('') }} {{ ansible_failed_result.stderr | default('') }}
+
+  always:
+    - name: "{{ appimage_app.name }}: remove temporary files"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ appimage_tmp }}"
+        - "{{ appimage_tmp }}.gpg"
+        - "{{ appimage_key }}"

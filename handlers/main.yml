@@ -1,0 +1,6 @@
+---
+# link handlers (MimeType=) of the menu entries, e.g. sgnl:// for Signal
+- name: Update desktop database
+  ansible.builtin.command:
+    argv: [update-desktop-database, -q, "{{ appimage_final.launcher_dir }}"]
+  changed_when: true
