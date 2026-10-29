@@ -41,13 +41,18 @@ Packages: `fuse` (fusermount for the AppImage runtime), `squashfs` (unsquashfs, 
 
 - per user: start "Signal" from the menu, link it with the phone (QR code: Signal on the phone → Settings → Linked
   devices). Data: `~/.config/Signal` (message history of this computer, keys).
-- sandbox: Signal's start script adds `--no-sandbox` only if unprivileged user namespaces don't work (`unshare -Ur
-  true`); on Leap they do, so Signal keeps Chromium's sandbox. Check: `ps -ef | grep -i signal | grep -c no-sandbox`
-  → 0.
+- sandbox: Signal's start script adds `--no-sandbox` to the whole app only if unprivileged user namespaces don't
+  work (`unshare -Ur true`); on Leap they do, so the main process, zygotes and GPU process are sandboxed. One process
+  still shows `--no-sandbox`: the renderer of Signal's main window - Signal creates that window with
+  `webPreferences: {sandbox: false}` (in its `app.asar`; all other Signal windows use `sandbox: true`), the same in
+  every package format (deb, Flatpak, AppImage); node integration stays off there. Check (expected: 1, a renderer):
+  `ps -eo args | grep -i '[s]ignal' | grep -- '--no-sandbox' | grep -o -- '--type=[a-z-]*'` → `--type=renderer`.
+  More processes with `--no-sandbox` (main process, zygotes) = the start script's fallback triggered.
 - updates come with the next ansible run (the AppImage is root-owned, so Signal's own updater should not be able to
   replace it - what Signal shows then: still to be checked on the VM).
   Signal Desktop builds expire after about 90 days - run the role at least monthly.
-- after a change of the menu entry GNOME may keep the old one until the next login.
+- menu entry: a new entry/icon shows up in GNOME right away; a changed entry (start command, icon) only after the
+  next logout/login - GNOME keeps the old one until then (`gtk-launch appimage-signal` starts the current file).
 
 ## Variables
 
